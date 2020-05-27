@@ -4,12 +4,15 @@
 // For now, TextContainer can only handle one file.
 #include <string>
 #include <vector>
+#include <fstream>
 using WCHAR = wchar_t;
+
+namespace LeeText
+{ 
 
 class TextContainer
 {
 public:
-   enum class CURSORDIRECTION {UP, DOWN, LEFT, RIGHT}; // scoped enum because God knows we don't need more #define-d constants flying around
 
    void insertText(WCHAR c);
    void insertText(std::wstring text);
@@ -19,8 +22,8 @@ public:
 
    [[nodiscard]] bool saveToFile(std::wstring filename) const; // if saving fails, we'd better tell the user.
    void loadFromFile(std::wstring filename); // if loading fails, the user will know one way or another.
-
-   void moveCursor(CURSORDIRECTION d);
+   
+   void moveCursor(int idxMove);
    int getCursorRow() const;
    int getCursorCol() const;
 private:
@@ -29,3 +32,5 @@ private:
    int cursorY = 0;
    std::wstring text;
 };
+
+} // namespace LeeText

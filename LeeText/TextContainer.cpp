@@ -1,4 +1,5 @@
 #include "TextContainer.h"
+using namespace LeeText;
 
 void TextContainer::insertText(WCHAR c)
 {
@@ -64,21 +65,26 @@ std::vector<std::wstring> TextContainer::getLines(int maxLen)
    std::vector<std::wstring> lines;
    int numCharsThisLine = 0;
    size_t totalChars = 0;
+   this->cursorX = 0;
+   this->cursorY = 0;
    for (auto c : this->text)
    {
       line.push_back(c);
       if (totalChars+1 == this->cursorIdx)
       {
-         cursorX = line.length();
-         cursorY = lines.size();
+         this->cursorX = line.length();
+         this->cursorY = lines.size();
+         if (c == L'\n')
+         {
+            this->cursorX = 0;
+            this->cursorY++;
+         }
       }
       totalChars++;
       numCharsThisLine++;
       if (c == L'\n' || numCharsThisLine == maxLen)
       {
          lines.push_back(line);
-         this->cursorX = 0;
-         this->cursorY++;
          line.clear();
          numCharsThisLine = 0;
       }
@@ -90,35 +96,63 @@ std::vector<std::wstring> TextContainer::getLines(int maxLen)
    return lines;
 }
 
-void TextContainer::moveCursor(CURSORDIRECTION d)
+bool LeeText::TextContainer::saveToFile(std::wstring filename) const
 {
-   switch (d)
+   bool save_successful = false;
+   std::wofstream outfile;
+   outfile.open(filename);
+   if (outfile.is_open())
    {
-   case CURSORDIRECTION::RIGHT:
-      if (this->cursorIdx < this->text.size()) // if we aren't at the end of the text
-      {
-         if (this->text.at(this->cursorIdx) != L'\n') // if we aren't at the end of the line
-         {
-            cursorIdx++;
-            cursorX++;
-         }
-      }
-      break;
-   case CURSORDIRECTION::LEFT:
-      if (this->cursorIdx > 0) // if we aren't at the beginning of the text
-      {
-         if (this->text.at(this->cursorIdx - 1) != L'\n') // if we aren't at the beginning of the line
-         {
-            cursorIdx--;
-            cursorX--;
-         }
-      }
-      break;
-   case CURSORDIRECTION::UP:
+      outfile << this->text;
+      outfile.close();
+      save_successful = true;
+   }
+   return save_successful;
+}
 
-      break;
-   default:
-      break;
+void TextContainer::loadFromFile(std::wstring filename)
+{
+   std::wifstream infile;
+   infile.open(filename);
+   if (infile.is_open())
+   {
+      this->text.clear();
+      this->cursorIdx = 0;
+      this->cursorX = 0;
+      this->cursorY = 0;
+      std::wstring line;
+      while (std::getline(infile, line))
+      {
+         this->text.append(line+L'\n');
+      }
+      infile.close();
+   }
+  
+}
+
+void TextContainer::moveCursor(int idxMove)
+{
+   if (idxMove < 0)
+   {
+      if (static_cast<long long>(this->cursorIdx) + idxMove <= 0)
+      {
+         this->cursorIdx = 0;
+      }
+      else
+      {
+         this->cursorIdx += idxMove;
+      }
+   }
+   else
+   {
+      if (this->cursorIdx + idxMove >= this->text.size())
+      {
+         this->cursorIdx = this->text.size();
+      }
+      else 
+      {
+         this->cursorIdx += idxMove;
+      }
    }
 }
 

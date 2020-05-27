@@ -4,6 +4,7 @@
 #include "framework.h"
 #include "LeeText.h"
 #include "TextContainer.h"
+using namespace LeeText;
 
 #define MAX_LOADSTRING 100
 
@@ -12,6 +13,9 @@ HINSTANCE hInst;                                // current instance
 WCHAR szTitle[MAX_LOADSTRING];                  // The title bar text
 WCHAR szWindowClass[MAX_LOADSTRING];            // the main window class name
 TextContainer userText;
+std::wstring openFileName;
+constexpr int CHAR_HEIGHT = 15;
+constexpr int CHAR_WIDTH = 8;
 
 // Forward declarations of functions included in this code module:
 ATOM                MyRegisterClass(HINSTANCE hInstance);
@@ -29,7 +33,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
    UNREFERENCED_PARAMETER(lpCmdLine);
 
    // TODO: Place code here.
-   
+
 
    // Initialize global strings
    LoadStringW(hInstance, IDS_APP_TITLE, szTitle, MAX_LOADSTRING);
@@ -142,8 +146,115 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
       case IDM_EXIT:
          DestroyWindow(hWnd);
          break;
+      case IDM_OPEN:
+      {
+         HRESULT hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED |
+            COINIT_DISABLE_OLE1DDE);
+         if (SUCCEEDED(hr))
+         {
+            IFileOpenDialog* pFileOpen;
+
+            // Create the FileOpenDialog object.
+            hr = CoCreateInstance(CLSID_FileOpenDialog, NULL, CLSCTX_ALL,
+               IID_IFileOpenDialog, reinterpret_cast<void**>(&pFileOpen));
+
+            if (SUCCEEDED(hr))
+            {
+               // Show the Open dialog box.
+               hr = pFileOpen->Show(NULL);
+
+               // Get the file name from the dialog box.
+               if (SUCCEEDED(hr))
+               {
+                  IShellItem* pItem;
+                  hr = pFileOpen->GetResult(&pItem);
+                  if (SUCCEEDED(hr))
+                  {
+                     PWSTR pszFilePath;
+                     hr = pItem->GetDisplayName(SIGDN_FILESYSPATH, &pszFilePath);
+
+                     // Display the file name to the user.
+                     if (SUCCEEDED(hr))
+                     {
+                        //MessageBox(NULL, pszFilePath, L"Saved", MB_OK);
+                        std::wstring fname(pszFilePath);
+                        openFileName = fname;
+                        userText.loadFromFile(openFileName);
+                        CoTaskMemFree(pszFilePath);
+                     }
+                     pItem->Release();
+                  }
+               }
+               pFileOpen->Release();
+            }
+            CoUninitialize();
+         }
+         RedrawWindow(hWnd, NULL, NULL, RDW_ERASE | RDW_FRAME | RDW_INVALIDATE | RDW_ALLCHILDREN);
+      }
+         break;
+      case IDM_SAVE_AS:
+      {
+         HRESULT hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED |
+            COINIT_DISABLE_OLE1DDE);
+         if (SUCCEEDED(hr))
+         {
+            IFileSaveDialog* pFileSave;
+
+            // Create the FileOpenDialog object.
+            hr = CoCreateInstance(CLSID_FileSaveDialog, NULL, CLSCTX_ALL,
+               IID_IFileSaveDialog, reinterpret_cast<void**>(&pFileSave));
+
+            if (SUCCEEDED(hr))
+            {
+               // Show the Open dialog box.
+               hr = pFileSave->Show(NULL);
+
+               // Get the file name from the dialog box.
+               if (SUCCEEDED(hr))
+               {
+                  IShellItem* pItem;
+                  hr = pFileSave->GetResult(&pItem);
+                  if (SUCCEEDED(hr))
+                  {
+                     PWSTR pszFilePath;
+                     hr = pItem->GetDisplayName(SIGDN_FILESYSPATH, &pszFilePath);
+
+                     // Display the file name to the user.
+                     if (SUCCEEDED(hr))
+                     {
+                        //MessageBox(NULL, pszFilePath, L"Saved", MB_OK);
+                        std::wstring fname(pszFilePath);
+                        openFileName = fname;
+                        auto result = userText.saveToFile(openFileName);
+                        if (!result)
+                        {
+                           MessageBox(NULL, pszFilePath, L"Error! Failed to Save!", MB_OK);
+                        }
+                        CoTaskMemFree(pszFilePath);
+                     }
+                     pItem->Release();
+                  }
+               }
+               pFileSave->Release();
+            }
+            CoUninitialize();
+         }
+      }
+         break;
       case IDM_SAVE:
-         Save(hWnd, NULL, NULL, NULL);
+         if (!openFileName.empty())
+         {
+            auto result = userText.saveToFile(openFileName);
+            if (!result)
+            {
+               //PWSTR pszFilePath = openFileName.c_str();
+               MessageBox(NULL, openFileName.c_str(), L"Error!", MB_OK);
+            }
+         }
+         else 
+         {
+            MessageBox(NULL, L"No open file!", L"Error!", MB_OK);
+         }
          break;
       case IDM_TOGGLEWRAP:
          linewrap = !linewrap;
@@ -161,11 +272,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
       // Retrieve a handle to the fixed stock font.  
       HFONT hFont = (HFONT)GetStockObject(ANSI_FIXED_FONT);
       SelectObject(hdc, hFont);
-      constexpr int CHAR_HEIGHT = 15;
-      constexpr int CHAR_WIDTH = 8;
       int linenum = 0;
-      int cursorX = 0;
-      int cursorY = 0;
       if (linewrap)
       {
          RECT rect;
@@ -190,7 +297,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
          }
       }
       SetCaretPos(userText.getCursorCol() * CHAR_WIDTH, userText.getCursorRow() * CHAR_HEIGHT);
-      
+
       EndPaint(hWnd, &ps);
    }
    break;
@@ -225,21 +332,74 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
          redraw = true;
          break;
       case VK_RIGHT:
-         userText.moveCursor(TextContainer::CURSORDIRECTION::RIGHT);
+         userText.moveCursor(1);
          redraw = true;
          break;
       case VK_LEFT:
-         userText.moveCursor(TextContainer::CURSORDIRECTION::LEFT);
+         userText.moveCursor(-1);
          redraw = true;
          break;
       case VK_UP:
-         userText.moveCursor(TextContainer::CURSORDIRECTION::UP);
+      {
+         std::vector<std::wstring> lines;
+         if (linewrap)
+         {
+            RECT rect;
+            GetWindowRect(hWnd, &rect);
+            int width = rect.right - rect.left;
+            int height = rect.bottom - rect.top;
+            int widthInChars = width / 8 - 2;
+            lines = userText.getLines(widthInChars);
+         }
+         else
+         {
+            lines = userText.getLines();
+         }
+         if (userText.getCursorRow())
+         {
+            auto currLine = lines.at(userText.getCursorRow());
+            auto prevLine = lines.at(userText.getCursorRow() - 1);
+            auto move = static_cast<int>(max(currLine.length() - currLine.substr(userText.getCursorCol()).length() + 1, prevLine.length()));
+            userText.moveCursor(-move);
+         }
          redraw = true;
-         break;
+      }
+      break;
       case VK_DOWN:
-         userText.moveCursor(TextContainer::CURSORDIRECTION::DOWN);
-         redraw = true;
-         break;
+      {
+         std::vector<std::wstring> lines;
+         if (linewrap)
+         {
+            RECT rect;
+            GetWindowRect(hWnd, &rect);
+            int width = rect.right - rect.left;
+            int height = rect.bottom - rect.top;
+            int widthInChars = width / 8 - 2;
+            lines = userText.getLines(widthInChars);
+         }
+         else
+         {
+            lines = userText.getLines();
+         }
+         if (userText.getCursorRow() < static_cast<int>(lines.size()) - 1)
+         {
+            auto currLine = lines.at(userText.getCursorRow());
+            auto nextLine = lines.at(userText.getCursorRow() + 1);
+            auto move = static_cast<int>(min(currLine.length(), 
+               (nextLine.length() + currLine.substr(userText.getCursorCol()).length() - 1) + static_cast<int>(nextLine.back() != L'\n')));
+            /*This kind of witchcraft bears explaining: 
+            some lines end with newline characters that are not displayed. However, they occupy  an index in the userText.text field. 
+            Since they are indexed, we have to count them when traversing lines. How do we count them? In the default case, we say a line is one character shorter than its display 
+            (assuming a newline is printed). However, if the last character on a line is not a newline, that is, nextLine.back() != '\n', 
+            we don't subtract out a newline character. Since the boolean expression returns one, if a newline character exists,
+            we add 0 to the calculation and it proceeds; if no newline character exists, we add a character to our count, casting the bool to an int.*/
+            userText.moveCursor(move);
+         }
+
+
+      }
+      redraw = true;
+      break;
       default:
          break;
       }
@@ -250,8 +410,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
    }
    break;
    case WM_SETFOCUS:
-      CreateCaret(hWnd, (HBITMAP) NULL, 2, 15);
-      SetCaretPos(0, 0);
+      CreateCaret(hWnd, (HBITMAP)NULL, 2, 15);
+      SetCaretPos(userText.getCursorCol()*CHAR_WIDTH, userText.getCursorRow()*CHAR_HEIGHT);
       ShowCaret(hWnd);
       break;
    case WM_DESTROY:

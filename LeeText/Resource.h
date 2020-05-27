@@ -10,7 +10,9 @@
 #define IDM_ABOUT				104
 #define IDM_EXIT				105
 #define IDM_TOGGLEWRAP     106
+#define IDM_OPEN           116
 #define IDM_SAVE           117
+#define IDM_SAVE_AS        118
 #define IDI_LEETEXT			107
 #define IDI_SMALL				108
 #define IDC_LEETEXT			109
