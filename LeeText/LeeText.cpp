@@ -3,26 +3,30 @@
 
 #include "framework.h"
 #include "LeeText.h"
-#include "TextContainer.h"
 using namespace LeeText;
 
-#define MAX_LOADSTRING 100
-
+constexpr int MAX_LOADSTRING = 100;
+constexpr int CHAR_HEIGHT = 15;
+constexpr int CHAR_WIDTH = 8;
 // Global Variables:
 HINSTANCE hInst;                                // current instance
 WCHAR szTitle[MAX_LOADSTRING];                  // The title bar text
 WCHAR szWindowClass[MAX_LOADSTRING];            // the main window class name
 TextContainer userText;
 std::wstring openFileName;
-constexpr int CHAR_HEIGHT = 15;
-constexpr int CHAR_WIDTH = 8;
+LeeTextStatics LTinfo;
+
+//undef some WINAPI defines; prefer std implementations
+#undef max
+#undef min
 
 // Forward declarations of functions included in this code module:
 ATOM                MyRegisterClass(HINSTANCE hInstance);
 BOOL                InitInstance(HINSTANCE, int);
 LRESULT CALLBACK    WndProc(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK    About(HWND, UINT, WPARAM, LPARAM);
-bool CALLBACK       Save(HWND, UINT, WPARAM, LPARAM);
+void cursorUp(HWND hWnd, bool linewrap);
+void cursorDown(HWND hWnd, bool linewrap);
 
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
    _In_opt_ HINSTANCE hPrevInstance,
@@ -60,7 +64,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
       }
    }
 
-   return (int)msg.wParam;
+   return static_cast<int>(msg.wParam);
 }
 
 
@@ -105,7 +109,7 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 {
    hInst = hInstance; // Store instance handle in our global variable
 
-   HWND hWnd = CreateWindowW(szWindowClass, szTitle, WS_OVERLAPPEDWINDOW,
+   HWND hWnd = CreateWindowW(szWindowClass, szTitle, WS_OVERLAPPEDWINDOW | WS_VSCROLL,
       CW_USEDEFAULT, 0, CW_USEDEFAULT, 0, nullptr, nullptr, hInstance, nullptr);
 
    if (!hWnd)
@@ -130,8 +134,7 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 //
 //
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
-{
-   static bool linewrap = false;
+{ 
    switch (message)
    {
    case WM_COMMAND:
@@ -191,7 +194,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
          }
          RedrawWindow(hWnd, NULL, NULL, RDW_ERASE | RDW_FRAME | RDW_INVALIDATE | RDW_ALLCHILDREN);
       }
-         break;
+      break;
       case IDM_SAVE_AS:
       {
          HRESULT hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED |
@@ -240,7 +243,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             CoUninitialize();
          }
       }
-         break;
+      break;
       case IDM_SAVE:
          if (!openFileName.empty())
          {
@@ -251,13 +254,13 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                MessageBox(NULL, openFileName.c_str(), L"Error!", MB_OK);
             }
          }
-         else 
+         else
          {
             MessageBox(NULL, L"No open file!", L"Error!", MB_OK);
          }
          break;
       case IDM_TOGGLEWRAP:
-         linewrap = !linewrap;
+         LTinfo.linewrap = !LTinfo.linewrap;
          RedrawWindow(hWnd, NULL, NULL, RDW_ERASE | RDW_FRAME | RDW_INVALIDATE | RDW_ALLCHILDREN);
          break;
       default:
@@ -265,6 +268,44 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
       }
    }
    break;
+   case WM_SIZE:
+      LTinfo.cyClient = HIWORD(lParam);
+      return 0;
+   case WM_VSCROLL:
+      switch (LOWORD(wParam))
+      {
+      case SB_LINEUP:
+         LTinfo.iVscrollPos -= 1;
+         break;
+
+      case SB_LINEDOWN:
+         LTinfo.iVscrollPos += 1;
+         break;
+
+      case SB_PAGEUP:
+         LTinfo.iVscrollPos -= LTinfo.cyClient / CHAR_HEIGHT;
+         break;
+
+      case SB_PAGEDOWN:
+         LTinfo.iVscrollPos += LTinfo.cyClient / CHAR_HEIGHT;
+         break;
+
+      case SB_THUMBPOSITION:
+         LTinfo.iVscrollPos = HIWORD(wParam);
+         break;
+
+      default:
+         break;
+      }
+
+      LTinfo.iVscrollPos = std::max(0, std::min(LTinfo.iVscrollPos, LTinfo.NUMLINES - 1));
+
+      if (LTinfo.iVscrollPos != GetScrollPos(hWnd, SB_VERT))
+      {
+         SetScrollPos(hWnd, SB_VERT, LTinfo.iVscrollPos, TRUE);
+         InvalidateRect(hWnd, NULL, TRUE);
+      }
+      return 0;
    case WM_PAINT:
    {
       PAINTSTRUCT ps;
@@ -273,7 +314,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
       HFONT hFont = (HFONT)GetStockObject(ANSI_FIXED_FONT);
       SelectObject(hdc, hFont);
       int linenum = 0;
-      if (linewrap)
+      if (LTinfo.linewrap)
       {
          RECT rect;
          GetWindowRect(hWnd, &rect);
@@ -283,7 +324,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
          auto textToPrint = userText.getLines(widthInChars);
          for (auto& line : textToPrint)
          {
-            TextOut(hdc, 0, linenum * CHAR_HEIGHT, line.c_str(), line.length());
+            if (linenum >= LTinfo.iVscrollPos)
+            {
+               TextOut(hdc, 0, (linenum - LTinfo.iVscrollPos) * CHAR_HEIGHT, line.c_str(), line.length());
+            }
             linenum++;
          }
       }
@@ -292,12 +336,17 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
          auto textToPrint = userText.getLines();
          for (auto& line : textToPrint)
          {
-            TextOut(hdc, 0, linenum * CHAR_HEIGHT, line.c_str(), line.length());
+            if (linenum >= LTinfo.iVscrollPos)
+            {
+               TextOut(hdc, 0, (linenum - LTinfo.iVscrollPos) * CHAR_HEIGHT, line.c_str(), line.length());
+            }
             linenum++;
          }
       }
+      LTinfo.NUMLINES = linenum;
       SetCaretPos(userText.getCursorCol() * CHAR_WIDTH, userText.getCursorRow() * CHAR_HEIGHT);
-
+      SetScrollRange(hWnd, SB_VERT, 0, LTinfo.NUMLINES - 1, FALSE);
+      SetScrollPos(hWnd, SB_VERT, LTinfo.iVscrollPos, TRUE);
       EndPaint(hWnd, &ps);
    }
    break;
@@ -340,66 +389,13 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
          redraw = true;
          break;
       case VK_UP:
-      {
-         std::vector<std::wstring> lines;
-         if (linewrap)
-         {
-            RECT rect;
-            GetWindowRect(hWnd, &rect);
-            int width = rect.right - rect.left;
-            int height = rect.bottom - rect.top;
-            int widthInChars = width / 8 - 2;
-            lines = userText.getLines(widthInChars);
-         }
-         else
-         {
-            lines = userText.getLines();
-         }
-         if (userText.getCursorRow())
-         {
-            auto currLine = lines.at(userText.getCursorRow());
-            auto prevLine = lines.at(userText.getCursorRow() - 1);
-            auto move = static_cast<int>(max(currLine.length() - currLine.substr(userText.getCursorCol()).length() + 1, prevLine.length()));
-            userText.moveCursor(-move);
-         }
+         cursorUp(hWnd, LTinfo.linewrap);
          redraw = true;
-      }
-      break;
+         break;
       case VK_DOWN:
-      {
-         std::vector<std::wstring> lines;
-         if (linewrap)
-         {
-            RECT rect;
-            GetWindowRect(hWnd, &rect);
-            int width = rect.right - rect.left;
-            int height = rect.bottom - rect.top;
-            int widthInChars = width / 8 - 2;
-            lines = userText.getLines(widthInChars);
-         }
-         else
-         {
-            lines = userText.getLines();
-         }
-         if (userText.getCursorRow() < static_cast<int>(lines.size()) - 1)
-         {
-            auto currLine = lines.at(userText.getCursorRow());
-            auto nextLine = lines.at(userText.getCursorRow() + 1);
-            auto move = static_cast<int>(min(currLine.length(), 
-               (nextLine.length() + currLine.substr(userText.getCursorCol()).length() - 1) + static_cast<int>(nextLine.back() != L'\n')));
-            /*This kind of witchcraft bears explaining: 
-            some lines end with newline characters that are not displayed. However, they occupy  an index in the userText.text field. 
-            Since they are indexed, we have to count them when traversing lines. How do we count them? In the default case, we say a line is one character shorter than its display 
-            (assuming a newline is printed). However, if the last character on a line is not a newline, that is, nextLine.back() != '\n', 
-            we don't subtract out a newline character. Since the boolean expression returns one, if a newline character exists,
-            we add 0 to the calculation and it proceeds; if no newline character exists, we add a character to our count, casting the bool to an int.*/
-            userText.moveCursor(move);
-         }
-
-
-      }
-      redraw = true;
-      break;
+         cursorDown(hWnd, LTinfo.linewrap);
+         redraw = true;
+         break;
       default:
          break;
       }
@@ -409,9 +405,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
       }
    }
    break;
+   break;
    case WM_SETFOCUS:
-      CreateCaret(hWnd, (HBITMAP)NULL, 2, 15);
-      SetCaretPos(userText.getCursorCol()*CHAR_WIDTH, userText.getCursorRow()*CHAR_HEIGHT);
+      CreateCaret(hWnd, (HBITMAP)nullptr, 2, 15);
+      SetCaretPos(userText.getCursorCol() * CHAR_WIDTH, userText.getCursorRow() * CHAR_HEIGHT);
       ShowCaret(hWnd);
       break;
    case WM_DESTROY:
@@ -423,10 +420,61 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
    return 0;
 }
 
-bool CALLBACK Save(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
+void cursorUp(HWND hWnd, bool linewrap)
 {
-   // TODO: this
-   return 0;
+   std::vector<std::wstring> lines;
+   if (linewrap)
+   {
+      RECT rect;
+      GetWindowRect(hWnd, &rect);
+      int width = rect.right - rect.left;
+      int height = rect.bottom - rect.top;
+      int widthInChars = width / 8 - 2;
+      lines = userText.getLines(widthInChars);
+   }
+   else
+   {
+      lines = userText.getLines();
+   }
+   if (userText.getCursorRow())
+   {
+      auto currLine = lines.at(userText.getCursorRow());
+      auto prevLine = lines.at(userText.getCursorRow() - static_cast<size_t>(1));
+      auto move = static_cast<int>(std::max(currLine.length() - currLine.substr(userText.getCursorCol()).length() + 1, prevLine.length()));
+      userText.moveCursor(-move);
+   }
+}
+
+void cursorDown(HWND hWnd, bool linewrap)
+{
+   std::vector<std::wstring> lines;
+   if (linewrap)
+   {
+      RECT rect;
+      GetWindowRect(hWnd, &rect);
+      int width = rect.right - rect.left;
+      int height = rect.bottom - rect.top;
+      int widthInChars = width / 8 - 2;
+      lines = userText.getLines(widthInChars);
+   }
+   else
+   {
+      lines = userText.getLines();
+   }
+   if (userText.getCursorRow() < static_cast<int>(lines.size()) - 1)
+   {
+      auto currLine = lines.at(userText.getCursorRow());
+      auto nextLine = lines.at(userText.getCursorRow() + static_cast<size_t>(1));
+      auto move = static_cast<int>(std::min(currLine.length(),
+         (nextLine.length() + currLine.substr(userText.getCursorCol()).length() - 1) + static_cast<int>(nextLine.back() != L'\n')));
+      /*This kind of witchcraft bears explaining:
+      some lines end with newline characters that are not displayed. However, they occupy  an index in the userText.text field.
+      Since they are indexed, we have to count them when traversing lines. How do we count them? In the default case, we say a line is one character shorter than its display
+      (assuming a newline is printed). However, if the last character on a line is not a newline, that is, nextLine.back() != '\n',
+      we don't subtract out a newline character. Since the boolean expression returns one, if a newline character exists,
+      we add 0 to the calculation and it proceeds; if no newline character exists, we add a character to our count, casting the bool to an int.*/
+      userText.moveCursor(move);
+   }
 }
 
 // Message handler for about box.
@@ -448,3 +496,67 @@ INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
    }
    return (INT_PTR)FALSE;
 }
+
+static void
+CustomOnWmSize(HWND hWnd, UINT uWidth, UINT uHeight)
+{
+   SCROLLINFO si;
+
+   si.cbSize = sizeof(SCROLLINFO);
+   si.fMask = SIF_PAGE;
+
+   si.nPage = uWidth;
+   SetScrollInfo(hWnd, SB_HORZ, &si, FALSE);
+
+   // FIX: Make sure uHeight has the right value:
+   {
+      RECT rc;
+      GetClientRect(hWnd, &rc);
+      uHeight = rc.bottom - rc.top;
+   }
+
+   si.nPage = uHeight;
+   SetScrollInfo(hWnd, SB_VERT, &si, TRUE);
+}
+
+/*static void
+CustomHandleVScroll(HWND hwnd, int iAction)
+{
+   int nPos;
+   int nOldPos;
+   SCROLLINFO si;
+
+   // Get current scrollbar state:
+   si.cbSize = sizeof(SCROLLINFO);
+   si.fMask = SIF_RANGE | SIF_PAGE | SIF_POS | SIF_TRACKPOS;
+   GetScrollInfo(pData->hwnd, SB_VERT, &si);
+
+   nOldPos = si.nPos;
+
+   // Compute new nPos.
+   // Note we do not care where nPos falls between nMin and nMax. See below.
+   switch (iAction) {
+   case SB_TOP:            nPos = si.nMin; break;
+   case SB_BOTTOM:         nPos = si.nMax; break;
+   case SB_LINEUP:         nPos = si.nPos - 1; break;
+   case SB_LINEDOWN:       nPos = si.nPos + 1; break;
+   case SB_PAGEUP:         nPos = si.nPos - CustomLogicalPage(si.nPage); break;
+   case SB_PAGEDOWN:       nPos = si.nPos + CustomLogicalPage(si.nPage); break;
+   case SB_THUMBTRACK:     nPos = si.nTrackPos; break;
+   default:
+   case SB_THUMBPOSITION:  nPos = si.nPos; break;
+   }
+
+   // Update the scrollbar state (nPos) and repaint it. The function ensures
+   // the nPos does not fall out of the allowed range between nMin and nMax
+   // hence we ask for the corrected nPos again.
+   SetScrollPos(hwnd, SB_VERT, nPos, TRUE);
+   nPos = GetScrollPos(hwnd, SB_VERT);
+
+   // Refresh the control (repaint it to reflect the new nPos). Note we
+   // here multiply with some unspecified scrolling unit which specifies
+   // amount of pixels corresponding to the 1 scrolling unit.
+   // We will discuss ScrollWindowEx() more later in the article.
+   ScrollWindowEx(hwnd, 0, (nOldPos - nPos) * scrollUnit
+      NULL, NULL, NULL, NULL, SW_ERASE | SW_INVALIDATE);
+}*/

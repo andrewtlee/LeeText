@@ -59,7 +59,7 @@ void TextContainer::removeText(int numchars)
    }
 }
 
-std::vector<std::wstring> TextContainer::getLines(int maxLen)
+std::vector<std::wstring> TextContainer::getLines(int scrollpos, int maxLen)
 {
    std::wstring line;
    std::vector<std::wstring> lines;
@@ -164,5 +164,15 @@ int TextContainer::getCursorRow() const
 int TextContainer::getCursorCol() const
 {
    return this->cursorX;
+}
+
+void TextContainer::setCursorToEnd()
+{
+   this->cursorIdx = this->text.length();
+}
+
+void LeeText::TextContainer::setCursorToBeginning()
+{
+   this->cursorIdx = 0;
 }
 

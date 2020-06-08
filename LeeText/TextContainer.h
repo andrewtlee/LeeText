@@ -26,6 +26,8 @@ public:
    void moveCursor(int idxMove);
    int getCursorRow() const;
    int getCursorCol() const;
+   void setCursorToEnd();
+   void setCursorToBeginning();
 private:
    size_t cursorIdx=0;
    int cursorX = 0;
