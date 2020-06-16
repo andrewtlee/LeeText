@@ -10,6 +10,7 @@
 #define IDM_ABOUT				104
 #define IDM_EXIT				105
 #define IDM_TOGGLEWRAP     106
+#define IDM_FIND           120
 #define IDM_OPEN           116
 #define IDM_SAVE           117
 #define IDM_SAVE_AS        118

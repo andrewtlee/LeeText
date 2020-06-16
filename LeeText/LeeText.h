@@ -10,7 +10,8 @@ namespace LeeText
 struct LeeTextStatics
 {
    bool linewrap = false;
-   int cxChar, cxCaps, cyChar, cyClient, iVscrollPos;
+   int cyClient = 0;
+   int iVscrollPos = 0;
    int NUMLINES = 0;
 };
 

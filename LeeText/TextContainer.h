@@ -17,8 +17,9 @@ public:
    void insertText(WCHAR c);
    void insertText(std::wstring text);
    void removeText(int numchars);
+   [[nodiscard]] size_t getNumLines(int maxLen=-1) const;
 
-   [[nodiscard]] std::vector<std::wstring> getLines(int maxLen=-1); // updates cursor row and col; negative maxlen indicates no linewrap.
+   [[nodiscard]] std::vector<std::wstring> getLines(int scrollPos, int winHeight, int maxLen=-1); // updates cursor row and col; negative maxlen indicates no linewrap.
 
    [[nodiscard]] bool saveToFile(std::wstring filename) const; // if saving fails, we'd better tell the user.
    void loadFromFile(std::wstring filename); // if loading fails, the user will know one way or another.
@@ -28,6 +29,7 @@ public:
    int getCursorCol() const;
    void setCursorToEnd();
    void setCursorToBeginning();
+   
 private:
    size_t cursorIdx=0;
    int cursorX = 0;

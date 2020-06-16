@@ -16,7 +16,7 @@ TextContainer userText;
 std::wstring openFileName;
 LeeTextStatics LTinfo;
 
-//undef some WINAPI defines; prefer std implementations
+//undef some WINAPI defines; prefer STL implementations
 #undef max
 #undef min
 
@@ -107,7 +107,9 @@ ATOM MyRegisterClass(HINSTANCE hInstance)
 //
 BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 {
+
    hInst = hInstance; // Store instance handle in our global variable
+
 
    HWND hWnd = CreateWindowW(szWindowClass, szTitle, WS_OVERLAPPEDWINDOW | WS_VSCROLL,
       CW_USEDEFAULT, 0, CW_USEDEFAULT, 0, nullptr, nullptr, hInstance, nullptr);
@@ -134,7 +136,8 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 //
 //
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
-{ 
+{
+   HWND hwndFind = nullptr;
    switch (message)
    {
    case WM_COMMAND:
@@ -256,12 +259,59 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
          }
          else
          {
-            MessageBox(NULL, L"No open file!", L"Error!", MB_OK);
+            HRESULT hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED |
+               COINIT_DISABLE_OLE1DDE);
+            if (SUCCEEDED(hr))
+            {
+               IFileSaveDialog* pFileSave;
+
+               // Create the FileOpenDialog object.
+               hr = CoCreateInstance(CLSID_FileSaveDialog, NULL, CLSCTX_ALL,
+                  IID_IFileSaveDialog, reinterpret_cast<void**>(&pFileSave));
+
+               if (SUCCEEDED(hr))
+               {
+                  // Show the Open dialog box.
+                  hr = pFileSave->Show(NULL);
+
+                  // Get the file name from the dialog box.
+                  if (SUCCEEDED(hr))
+                  {
+                     IShellItem* pItem;
+                     hr = pFileSave->GetResult(&pItem);
+                     if (SUCCEEDED(hr))
+                     {
+                        PWSTR pszFilePath;
+                        hr = pItem->GetDisplayName(SIGDN_FILESYSPATH, &pszFilePath);
+
+                        // Display the file name to the user.
+                        if (SUCCEEDED(hr))
+                        {
+                           //MessageBox(NULL, pszFilePath, L"Saved", MB_OK);
+                           std::wstring fname(pszFilePath);
+                           openFileName = fname;
+                           auto result = userText.saveToFile(openFileName);
+                           if (!result)
+                           {
+                              MessageBox(NULL, pszFilePath, L"Error! Failed to Save!", MB_OK);
+                           }
+                           CoTaskMemFree(pszFilePath);
+                        }
+                        pItem->Release();
+                     }
+                  }
+                  pFileSave->Release();
+               }
+               CoUninitialize();
+            }
          }
          break;
       case IDM_TOGGLEWRAP:
          LTinfo.linewrap = !LTinfo.linewrap;
          RedrawWindow(hWnd, NULL, NULL, RDW_ERASE | RDW_FRAME | RDW_INVALIDATE | RDW_ALLCHILDREN);
+         break;
+      case IDM_FIND:
+         MessageBox(NULL, L"Find function coming soon!", L"Oops!", MB_OK);
          break;
       default:
          return DefWindowProc(hWnd, message, wParam, lParam);
@@ -314,36 +364,32 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
       HFONT hFont = (HFONT)GetStockObject(ANSI_FIXED_FONT);
       SelectObject(hdc, hFont);
       int linenum = 0;
+      RECT rect;
+      GetWindowRect(hWnd, &rect);
+      int width = rect.right - rect.left;
+      int height = rect.bottom - rect.top;
+      int widthInChars = width / CHAR_WIDTH - 2;
+      int heightInChars = height / CHAR_HEIGHT - 2;
       if (LTinfo.linewrap)
       {
-         RECT rect;
-         GetWindowRect(hWnd, &rect);
-         int width = rect.right - rect.left;
-         int height = rect.bottom - rect.top;
-         int widthInChars = width / 8 - 2;
-         auto textToPrint = userText.getLines(widthInChars);
+         auto textToPrint = userText.getLines(LTinfo.iVscrollPos, heightInChars, widthInChars);
          for (auto& line : textToPrint)
          {
-            if (linenum >= LTinfo.iVscrollPos)
-            {
-               TextOut(hdc, 0, (linenum - LTinfo.iVscrollPos) * CHAR_HEIGHT, line.c_str(), line.length());
-            }
+            TextOut(hdc, 0, linenum * CHAR_HEIGHT, line.c_str(), line.length());
             linenum++;
          }
+         LTinfo.NUMLINES = userText.getNumLines(widthInChars);
       }
       else
       {
-         auto textToPrint = userText.getLines();
+         auto textToPrint = userText.getLines(LTinfo.iVscrollPos, heightInChars);
          for (auto& line : textToPrint)
          {
-            if (linenum >= LTinfo.iVscrollPos)
-            {
-               TextOut(hdc, 0, (linenum - LTinfo.iVscrollPos) * CHAR_HEIGHT, line.c_str(), line.length());
-            }
+            TextOut(hdc, 0, linenum * CHAR_HEIGHT, line.c_str(), line.length());
             linenum++;
          }
+         LTinfo.NUMLINES = userText.getNumLines();
       }
-      LTinfo.NUMLINES = linenum;
       SetCaretPos(userText.getCursorCol() * CHAR_WIDTH, userText.getCursorRow() * CHAR_HEIGHT);
       SetScrollRange(hWnd, SB_VERT, 0, LTinfo.NUMLINES - 1, FALSE);
       SetScrollPos(hWnd, SB_VERT, LTinfo.iVscrollPos, TRUE);
@@ -405,12 +451,32 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
       }
    }
    break;
-   break;
    case WM_SETFOCUS:
       CreateCaret(hWnd, (HBITMAP)nullptr, 2, 15);
       SetCaretPos(userText.getCursorCol() * CHAR_WIDTH, userText.getCursorRow() * CHAR_HEIGHT);
       ShowCaret(hWnd);
       break;
+   case WM_LBUTTONDOWN:
+   /*{
+      int cursorX = static_cast<int>(LOWORD(lParam)) / CHAR_WIDTH;
+      int cursorY = static_cast<int>(HIWORD(lParam)) / CHAR_HEIGHT;
+      
+      bool up = userText.getCursorRow() > cursorY;
+      for (int i=0; i < abs(userText.getCursorRow()-cursorY); i++)
+      {   
+         if (up)
+         {
+            cursorUp(hWnd, LTinfo.linewrap);
+         }
+         else
+         {
+            cursorDown(hWnd, LTinfo.linewrap);
+         }
+      }
+      //userText.moveCursor(cursorX - userText.getCursorCol());
+      RedrawWindow(hWnd, NULL, NULL, RDW_ERASE | RDW_FRAME | RDW_INVALIDATE | RDW_ALLCHILDREN);
+   }*/
+   break;
    case WM_DESTROY:
       PostQuitMessage(0);
       break;
@@ -423,18 +489,19 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 void cursorUp(HWND hWnd, bool linewrap)
 {
    std::vector<std::wstring> lines;
+   RECT rect;
+   GetWindowRect(hWnd, &rect);
+   int width = rect.right - rect.left;
+   int height = rect.bottom - rect.top;
+   int widthInChars = width / 8 - 2;
+   int heightInChars = height / CHAR_HEIGHT - 2;
    if (linewrap)
    {
-      RECT rect;
-      GetWindowRect(hWnd, &rect);
-      int width = rect.right - rect.left;
-      int height = rect.bottom - rect.top;
-      int widthInChars = width / 8 - 2;
-      lines = userText.getLines(widthInChars);
+      lines = userText.getLines(LTinfo.iVscrollPos, heightInChars, widthInChars);
    }
    else
    {
-      lines = userText.getLines();
+      lines = userText.getLines(LTinfo.iVscrollPos, heightInChars);
    }
    if (userText.getCursorRow())
    {
@@ -448,18 +515,19 @@ void cursorUp(HWND hWnd, bool linewrap)
 void cursorDown(HWND hWnd, bool linewrap)
 {
    std::vector<std::wstring> lines;
+   RECT rect;
+   GetWindowRect(hWnd, &rect);
+   int width = rect.right - rect.left;
+   int height = rect.bottom - rect.top;
+   int widthInChars = width / 8 - 2;
+   int heightInChars = height / CHAR_HEIGHT - 2;
    if (linewrap)
    {
-      RECT rect;
-      GetWindowRect(hWnd, &rect);
-      int width = rect.right - rect.left;
-      int height = rect.bottom - rect.top;
-      int widthInChars = width / 8 - 2;
-      lines = userText.getLines(widthInChars);
+      lines = userText.getLines(LTinfo.iVscrollPos, heightInChars, widthInChars);
    }
    else
    {
-      lines = userText.getLines();
+      lines = userText.getLines(LTinfo.iVscrollPos, heightInChars);
    }
    if (userText.getCursorRow() < static_cast<int>(lines.size()) - 1)
    {
